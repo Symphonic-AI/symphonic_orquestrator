@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langgraph-continue-proxy"
-version = "0.3.2"
-description = "Reverse Proxy em FastAPI + LangGraph com compactação de contexto e busca Tavily para o Continue.dev"
+version = "0.5.0"
+description = "Reverse Proxy em FastAPI + LangGraph (Single-Model Qwen3 com @tool e create_agent) com compactação de contexto e busca Tavily para o Continue.dev"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "Seu Nome", email = "seu-email@exemplo.com" }
+    { name = "Arthur Bonachela Fabiano", email = "seu-email@exemplo.com" }
 ]
 
 # Dependências principais de execução
@@ -18,10 +18,12 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.9.0",
+    "langchain>=0.3.0",
     "langchain-core>=0.3.0",
     "langgraph>=0.2.30",
     "langchain-openai>=0.2.0",
     "tavily-python>=0.5.0",
+    "python-dotenv>=1.0.0",
 ]
 
 # Dependências separadas para o ambiente de CI / Testes (pip install -e ".[dev]")
