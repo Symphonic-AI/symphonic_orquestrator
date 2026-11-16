@@ -1,15 +1,22 @@
 <div align="center">
 
-# ⚡ LangGraph Continue Proxy (Workflow AI Ollama)
+# ⚡ AI SLM Workflow Orchestration
 
-**Proxy reverso inteligente com FastAPI, LangGraph e Tavily para orquestração de LLMs locais no [Continue.dev](https://continue.dev/)**
+**Middleware e proxy reverso inteligente com FastAPI, LangGraph e Tavily para orquestração de SLMs locais no [Continue.dev](https://continue.dev/)**
 
-[CI Pipeline](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/actions/workflows/ci.yml)
-[Release](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/releases)
+[Version](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/releases)
 [](https://www.python.org/)
-[](https://opensource.org/licenses/MIT)
-[](https://ollama.com/)
+[](https://fastapi.tiangolo.com/)
 [](https://github.com/langchain-ai/langgraph)
+[](https://ollama.com/)
+[](https://opensource.org/licenses/MIT)
+
+<br>
+
+[](https://github.com/arthurbona123/workflow_ai_ollama)
+[Issues](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/issues)
+[Last Commit](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/commits/main)
+[Stars](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/stargazers)
 
 </div>
 
@@ -33,24 +40,24 @@
 
 ## 🚀 Visão Geral
 
-O **LangGraph Continue Proxy** (`workflow_ai_ollama`) é um middleware de proxy reverso construído com **FastAPI** e **LangGraph**, projetado para atuar como ponte entre assistentes de código para IDEs (como o [Continue.dev](https://continue.dev/)) e motores de inferência local ([Ollama](https://ollama.com/) ou [LM Studio](https://lmstudio.ai/)).
+O **AI SLM Workflow Orchestration** (`workflow_ai_ollama`) é um middleware de proxy reverso construído com **FastAPI** e **LangGraph**, projetado para atuar como ponte entre assistentes de código para IDEs (como o [Continue.dev](https://continue.dev/)) e motores de inferência local ([Ollama](https://ollama.com/) ou [LM Studio](https://lmstudio.ai/)).
 
-Ao usar modelos locais em desenvolvimento de software, dois problemas são recorrentes: o consumo excessivo da janela de contexto durante conversas longas e a falta de acesso a informações e documentações recentes na web. Este projeto resolve esses gargalos implementando:
+Ao utilizar Small Language Models (SLMs) locais no desenvolvimento de software, dois gargalos são recorrentes: o consumo acelerado da janela de contexto em sessões longas e a ausência de acesso a documentações recentes na web. Este projeto resolve esses pontos com:
 
-1. **Compressão Dinâmica de Histórico**: Um modelo leve resume mensagens anteriores em uma memória telegráfica, economizando tokens preciosos de contexto.
-2. **Roteamento Autônomo e RAG em Tempo Real**: O orquestrador detecta automaticamente a necessidade de dados externos e consulta a web via [Tavily Search API](https://tavily.com/).
+1. **Compressão Dinâmica de Histórico**: Um modelo auxiliar compacto resume mensagens anteriores em notas telegráficas, preservando tokens essenciais da janela de contexto.
+2. **Roteamento Autônomo e RAG em Tempo Real**: O orquestrador identifica automaticamente quando a consulta exige dados externos e executa pesquisas direcionadas via [Tavily Search API](https://tavily.com/).
 3. **Compatibilidade Total com a API OpenAI**: Exposição do endpoint `/v1/chat/completions` com suporte nativo a respostas em streaming (Server-Sent Events).
 
 ---
 
 ## ✨ Principais Funcionalidades
 
-- **Compatibilidade OpenAI /v1**: Atua como substituto transparente para ferramentas compatíveis com a especificação da OpenAI.
+- **Compatibilidade OpenAI `/v1`**: Atua como substituto transparente para qualquer cliente compatível com a especificação da OpenAI.
 - **Streaming SSE em Tempo Real**: Repasse contínuo de tokens gerados para resposta imediata na interface da IDE.
-- **Memória de Curto Prazo Eficiente**: Utiliza um LLM auxiliar compacto (por exemplo, `liquid/lfm2.5-1.2b`) para destilar e consolidar o histórico antes de cada chamada.
-- **Roteamento Inteligente com Decisão Autônoma**: O grafo avalia a intenção da query e aciona busca na web apenas quando estritamente necessário.
-- **Modelfiles Pré-configurados para Codificação e Autocomplete**: Configurações dedicadas para modelos como `qwen2.5:1.5b`, ajustadas para backend systems e Fill-In-The-Middle (FIM).
-- **Esteira Automatizada de CI/CD**: Verificação contínua com Pytest, cobertura de testes e publicação de releases empacotadas via GitHub Actions.
+- **Memória de Curto Prazo Eficiente**: Utiliza um SLM auxiliar compacto (por exemplo, `liquid/lfm2.5-1.2b`) para destilar e consolidar o histórico antes de cada chamada.
+- **Roteamento Inteligente com Decisão Autônoma**: O grafo avalia a intenção da query e aciona a busca na web apenas quando necessário.
+- **Modelfiles Pré-configurados para Codificação e Autocomplete**: Receitas dedicadas para modelos como `qwen2.5:1.5b`, ajustadas para engenharia de backend e Fill-In-The-Middle (FIM).
+- **Esteira Automatizada de CI/CD**: Verificação contínua com Pytest, cobertura de testes e empacotamento automatizado via GitHub Actions.
 
 ---
 
@@ -62,7 +69,7 @@ O fluxo de processamento de cada requisição é governado por uma máquina de e
 flowchart TD
     A[Requisição IDE / Continue.dev] --> B[FastAPI Proxy: /v1/chat/completions]
     B --> C[memory_and_input_prep_node]
-    C -->|Histórico comprimido com LLM Auxiliar| D{gemma_router_node}
+    C -->|Histórico comprimido com SLM Auxiliar| D{gemma_router_node}
     
     D -->|Precisa de dados externos| E[tavily_search_node]
     D -->|Conhecimento interno suficiente| F[prompt_builder_node]
@@ -82,7 +89,7 @@ flowchart TD
 3. **`tavily_search_node`**:
    Executa a busca direcionada na web e formata os snippets mais relevantes para compor o contexto da resposta.
 4. **`prompt_builder_node`**:
-   Monta a instrução de sistema unificada contendo a memória consolidada, os fatos recolhidos da web (quando houver) e a pergunta original do desenvolvedor, despachando o payload para o LLM principal.
+   Monta a instrução de sistema unificada contendo a memória consolidada, os fatos recolhidos da web (quando houver) e a pergunta original do desenvolvedor, despachando o payload para o SLM principal.
 
 ---
 
@@ -113,17 +120,17 @@ ollama create qwen2.5-coder-auto -f modelfiles_src/Modelfile_qwen2_5_coder_auto
 
 Abaixo estão relacionados os modelos open-source adotados, avaliados ou atualmente em fase ativa de testes de estresse, latência e performance (benchmarking de tempo de resposta em streaming, fidelidade de contexto e custo de inferência local):
 
-| Mantenedor / Criador | Modelo | Model Card & Paper Original | Versão Quantizada (GGUF) | Status no Workflow |
+| Mantenedor | Modelo | Model Card & Paper Original | Versão Quantizada (GGUF) | Status no Workflow |
 | :--- | :--- | :--- | :--- | :--- |
-| &lt;img src=&quot;https://cdn.simpleicons.org/google/4285F4&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Google&quot; valign=&quot;middle&quot; /&gt; **Google DeepMind** | **Gemma 3 (e4b / e2b)** | [Model Card (HF)](https://huggingface.co/google/gemma-4-E4B) • [Gemma Paper](https://arxiv.org/abs/2607.02770) | [Gemma GGUF Collections](https://huggingface.co/collections/google/googles-gemma-models-family) | ✅ Em uso / Estresse contínuo |
-| &lt;img src=&quot;https://cdn.simpleicons.org/alibabacloud/FF6A00&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Alibaba Cloud&quot; valign=&quot;middle&quot; /&gt; **Alibaba Cloud (Qwen)** | **Qwen2.5-Coder-3B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct) • [Qwen2.5-Coder Report](https://arxiv.org/abs/2409.12186) | [Qwen2.5-Coder-3B-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF) | ✅ Em uso / Testes de performance |
-| &lt;img src=&quot;https://cdn.simpleicons.org/alibabacloud/FF6A00&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Alibaba Cloud&quot; valign=&quot;middle&quot; /&gt; **Alibaba Cloud (Qwen)** | **Qwen2.5-Coder-1.5B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct) • [Qwen2.5-Coder Report](https://arxiv.org/abs/2409.12186) | [Qwen2.5-Coder-1.5B-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF) | ✅ Em uso / Autocomplete & Chat |
-| &lt;img src=&quot;https://cdn.simpleicons.org/alibabacloud/FF6A00&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Alibaba Cloud&quot; valign=&quot;middle&quot; /&gt; **Alibaba Cloud (Qwen)** | **Qwen2.5-0.8B (0.5B)** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) • [Qwen2.5 Paper](https://arxiv.org/abs/2412.15115) | [Qwen2.5-0.5B-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) | ✅ Em uso / Avaliação ultraleve |
-| &lt;img src=&quot;https://cdn.simpleicons.org/alibabacloud/FF6A00&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Alibaba Cloud&quot; valign=&quot;middle&quot; /&gt; **Alibaba Cloud (Qwen)** | **Qwen3-1.7B** | [Qwen Ecosystem Card](https://huggingface.co/Qwen) • [QwenLM Blog](https://qwenlm.github.io/) | [Qwen Series GGUFs](https://huggingface.co/models?search=Qwen+GGUF) | ✅ Em testes de estresse |
-| &lt;img src=&quot;https://cdn.simpleicons.org/meta/0081FB&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Meta&quot; valign=&quot;middle&quot; /&gt; **Meta AI** | **Llama 3.2 1B Instruct** | [Model Card (HF)](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) • [Llama 3 Paper](https://arxiv.org/abs/2407.21783) | [Llama-3.2-1B-GGUF](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF) | ✅ Em testes de inferência local |
-| &lt;img src=&quot;https://cdn.simpleicons.org/google/4285F4&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Google&quot; valign=&quot;middle&quot; /&gt; **Google DeepMind** | **Gemma 2 1B IT QAT** | [Model Card (HF)](https://huggingface.co/google/gemma-2-2b-it) • [Gemma 2 Report](https://arxiv.org/abs/2408.00118) | [Gemma-2-GGUF](https://huggingface.co/google/gemma-2-2b-it-GGUF) | ⏳ A testar (Quantization-Aware) |
-| &lt;img src=&quot;https://avatars.githubusercontent.com/u/150005510?s=48&amp;v=4&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Liquid AI&quot; valign=&quot;middle&quot; /&gt; **Liquid AI** | **Liquid LFM5.2-1.5B (LFM2.5)** | [Liquid AI Hub](https://huggingface.co/LiquidAI) • [Liquid Architecture Docs](https://www.liquid.ai/) | [LFM2.5-GGUF](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF) | ✅ Em uso (Nó de memória/Helper) |
-| &lt;img src=&quot;https://cdn.simpleicons.org/huggingface/FFD21E&quot; width=&quot;18&quot; height=&quot;18&quot; alt=&quot;Hugging Face&quot; valign=&quot;middle&quot; /&gt; **Hugging Face** | **SmolLM-1.7B Instruct** | [Model Card (HF)](https://huggingface.co/HuggingFaceTB/SmolLM-1.7B-Instruct) • [SmolLM Paper/Blog](https://huggingface.co/blog/smollm) | [SmolLM-1.7B-GGUF](https://huggingface.co/bartowski/SmolLM-1.7B-Instruct-v0.2-GGUF) | ⏳ A testar (Benchmark Edge) |
+|  | **Gemma 3 (e4b / e2b)** | [Model Card (HF)](https://huggingface.co/google/gemma-4-E4B) • [Gemma Paper](https://arxiv.org/abs/2607.02770) | [Gemma GGUF Collections](https://huggingface.co/collections/google/googles-gemma-models-family) |  |
+|  | **Qwen2.5-Coder-3B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct) • [Qwen2.5-Coder Report](https://arxiv.org/abs/2409.12186) | [Qwen2.5-Coder-3B-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF) |  |
+|  | **Qwen2.5-Coder-1.5B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct) • [Qwen2.5-Coder Report](https://arxiv.org/abs/2409.12186) | [Qwen2.5-Coder-1.5B-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF) |  |
+|  | **Qwen2.5-0.8B (0.5B)** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) • [Qwen2.5 Paper](https://arxiv.org/abs/2412.15115) | [Qwen2.5-0.5B-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) |  |
+|  | **Qwen3-1.7B** | [Qwen Ecosystem Card](https://huggingface.co/Qwen) • [QwenLM Blog](https://qwenlm.github.io/) | [Qwen Series GGUFs](https://huggingface.co/models?search=Qwen+GGUF) |  |
+|  | **Llama 3.2 1B Instruct** | [Model Card (HF)](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) • [Llama 3 Paper](https://arxiv.org/abs/2407.21783) | [Llama-3.2-1B-GGUF](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF) |  |
+|  | **Gemma 2 1B IT QAT** | [Model Card (HF)](https://huggingface.co/google/gemma-2-2b-it) • [Gemma 2 Report](https://arxiv.org/abs/2408.00118) | [Gemma-2-GGUF](https://huggingface.co/google/gemma-2-2b-it-GGUF) |  |
+|  | **Liquid LFM5.2-1.5B (LFM2.5)** | [Liquid AI Hub](https://huggingface.co/LiquidAI) • [Liquid Architecture Docs](https://www.liquid.ai/) | [LFM2.5-GGUF](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF) |  |
+|  | **SmolLM-1.7B Instruct** | [Model Card (HF)](https://huggingface.co/HuggingFaceTB/SmolLM-1.7B-Instruct) • [SmolLM Paper/Blog](https://huggingface.co/blog/smollm) | [SmolLM-1.7B-GGUF](https://huggingface.co/bartowski/SmolLM-1.7B-Instruct-v0.2-GGUF) |  |
 
 ---
 
