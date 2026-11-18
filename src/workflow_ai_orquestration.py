@@ -1,10 +1,11 @@
 """
 Continue.dev LangGraph Proxy — Workflow AI Ollama (v0.5.0)
-Arquitetura Dual-Model Refinada:
+Arquitetura Dual-Model com Duas Ferramentas (`tavily_web_search` + `sandbox_file_manager`):
 - Helper LLM (`liquid/lfm2.5-1.2b` / `lfm2.5-helper`): Sumarização de Memória de Curto Prazo
   via `.invoke()` direto com prompt isolado (sem Pydantic e sem SystemMessage em runtime).
-- Main LLM (`qwen/qwen3-1.7b` / `qwen3-main`): Agente de busca web via `@tool(return_direct=True)`
-  + `create_agent` e geração da resposta final via `.astream()` / `.ainvoke()` livre.
+- Main LLM (`qwen/qwen3-1.7b` / `qwen3-main`): Agente de ferramentas via `@tool(return_direct=True)`
+  + `create_agent` (`tavily_web_search` e `sandbox_file_manager`) e geração da resposta final
+  via `.astream()` / `.ainvoke()` livre, com retorno integral do arquivo no ToolMessage.
 """
 
 import os
@@ -12,7 +13,8 @@ import re
 import json
 import time
 import uuid
-from typing import List, TypedDict, Optional, Any
+from pathlib import Path
+from typing import List, Literal, TypedDict, Optional, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,18 +33,22 @@ except ImportError:
     from langgraph.prebuilt import create_react_agent as create_agent
 
 # ==========================================
-# 1. CONFIGURAÇÃO DE AMBIENTE E API
+# 1. CONFIGURAÇÃO DE AMBIENTE, SANDBOX E API
 # ==========================================
 
 load_dotenv()
+
+SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
+SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
 
 LOCAL_LLM_BASE_URL = os.environ.get("LOCAL_LLM_BASE_URL")
 LOCAL_LLM_API_KEY = os.environ.get("LOCAL_LLM_API_KEY")
 HELPER_MODEL_NAME = os.environ.get("HELPER_MODEL_NAME")
 MAIN_MODEL_NAME = os.environ.get("MAIN_MODEL_NAME")
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+# TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+TAVILY_API_KEY = ""
 
-app = FastAPI(title="AI Workflow Reverse Proxy", version="0.5.0")
+app = FastAPI(title="Continue.dev LangGraph Proxy", version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,9 +61,6 @@ app.add_middleware(
 # ==========================================
 # 2. CONFIGURAÇÃO DOS MODELOS (SEM OVERRIDES)
 # ==========================================
-# Parâmetros (temperature, top_k, top_p, min_p, num_ctx) e SYSTEM prompts
-# são gerenciados nativamente pelos Modelfiles no Ollama ou no LM Studio.
-
 helper_llm = ChatOpenAI(
     base_url=LOCAL_LLM_BASE_URL,
     api_key=LOCAL_LLM_API_KEY,
@@ -78,14 +81,9 @@ SESSION_MEMORY = {
 }
 
 # ==========================================
-# 3. FUNÇÕES SINTÁTICAS E FERRAMENTA `@tool`
+# 3. FUNÇÕES SINTÁTICAS E FERRAMENTAS `@tool`
 # ==========================================
-
 def sanitize_text_single_newline(raw_text: str) -> str:
-    """
-    Remove caracteres de controle/invisíveis, normaliza espaços e colapsa
-    quebras de linha duplas (\n\n+) em quebras simples (\n).
-    """
     if not raw_text:
         return ""
     cleaned = raw_text.replace("\r\n", "\n").replace("\r", "\n")
@@ -98,12 +96,19 @@ def sanitize_text_single_newline(raw_text: str) -> str:
 
 
 def sanitize_raw_tavily_snippet(raw_text: str, max_chars: int = 450) -> str:
-    """Limpa links markdown, colchetes e marcadores [...] dos resultados brutos do Tavily."""
     cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", raw_text)
     cleaned = cleaned.replace("[...]", " ")
     cleaned = re.sub(r"[\[\]{}]", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned[:max_chars]
+
+
+def strip_outer_markdown_fences(code_text: str) -> str:
+    stripped = code_text.strip()
+    match = re.match(r"^```[a-zA-Z0-9_+-]*\n(.*?)\n```$", stripped, flags=re.DOTALL)
+    if match:
+        return match.group(1)
+    return code_text
 
 
 class TavilySearchInput(BaseModel):
@@ -113,6 +118,34 @@ class TavilySearchInput(BaseModel):
             "Concise English search query (3 to 6 keywords) containing the exact library, "
             "framework, and method name (e.g., 'FastAPI lifespan async context manager docs')."
         )
+    )
+
+
+class SandboxFileToolInput(BaseModel):
+    """Input schema for reading and writing files inside the local sandbox directory."""
+    operacao: Literal["read_file", "write_file"] = Field(
+        description=(
+            "Select the exact file system action: "
+            "'read_file' to load and inspect an existing file from ./sandbox/, or "
+            "'write_file' to create or overwrite a file in ./sandbox/."
+        )
+    )
+    nome_arquivo: str = Field(
+        description=(
+            "Exact filename with extension to read or write inside ./sandbox/ "
+            "(e.g., 'script.py', 'Main.kt', 'pipeline.sql'). Do not include folder paths."
+        )
+    )
+    conteudo: str = Field(
+        default="",
+        description=(
+            "MANDATORY when operacao='write_file': provide the FINAL, COMPLETE, production-ready "
+            "source code to be saved on disk. Must include all required imports, strict type hints, "
+            "clean modular functions/classes, error handling, and an entry point if applicable. "
+            "Do NOT pass a simplified stub or placeholder here—write the exact same high-quality "
+            "code that you will present to the user, without outer ``` markdown fences. "
+            "Pass an empty string '' ONLY when operacao='read_file'."
+        ),
     )
 
 
@@ -151,10 +184,66 @@ def tavily_web_search(query: str) -> str:
     return "\n".join(snippets) if snippets else "No relevant external web documentation found."
 
 
-# Agente de ferramentas vinculado ao Main LLM (Qwen3)
+@tool("sandbox_file_manager", args_schema=SandboxFileToolInput, return_direct=True)
+def sandbox_file_manager(
+    operacao: Literal["read_file", "write_file"],
+    nome_arquivo: str,
+    conteudo: str = "",
+) -> str:
+    """
+    Read or write files inside the local './sandbox/' directory.
+    Always call this tool when the user asks to read, inspect, create, save, or write a file
+    (such as 'script.py', 'Main.kt', etc.). When operacao='write_file', pass the complete,
+    production-ready code inside 'conteudo' so the file on disk matches your final answer.
+    """
+    safe_name = os.path.basename(nome_arquivo.strip())
+    if not safe_name:
+        return "FILE_TOOL_ERROR: Invalid 'nome_arquivo' (empty filename)."
+
+    target_path = SANDBOX_DIR / safe_name
+    print(
+        f"[Main Tool Agent] sandbox_file_manager: operacao='{operacao}' | "
+        f"nome_arquivo='{safe_name}' | len(conteudo)={len(conteudo)} chars"
+    )
+
+    if operacao == "read_file":
+        if not target_path.exists() or not target_path.is_file():
+            return f"FILE_TOOL_ERROR: File '{safe_name}' does not exist in ./sandbox/."
+        try:
+            file_text = target_path.read_text(encoding="utf-8")
+            return (
+                f"FILE_READ_SUCCESS: Full content of './sandbox/{safe_name}' ({len(file_text)} chars):\n"
+                f"```\n{file_text}\n```"
+            )
+        except Exception as exc:
+            return f"FILE_TOOL_ERROR: Failed to read '{safe_name}': {exc}"
+
+    if operacao == "write_file":
+        cleaned_content = strip_outer_markdown_fences(conteudo).strip()
+        if not cleaned_content:
+            return (
+                f"FILE_WRITE_EMPTY_CONTENT_WARNING: Tool called for './sandbox/{safe_name}', "
+                "but 'conteudo' was empty (0 bytes)."
+            )
+        try:
+            target_path.write_text(cleaned_content + "\n", encoding="utf-8")
+            size_bytes = len((cleaned_content + "\n").encode("utf-8"))
+            line_count = len(cleaned_content.splitlines())
+            return (
+                f"FILE_WRITE_SUCCESS: File './sandbox/{safe_name}' has been created "
+                f"({size_bytes} bytes, {line_count} lines) with the exact content below.\n"
+                "Present this exact code and explain it clearly to the user:\n"
+                f"```\n{cleaned_content}\n```"
+            )
+        except Exception as exc:
+            return f"FILE_TOOL_ERROR: Failed to write '{safe_name}': {exc}"
+
+    return f"FILE_TOOL_ERROR: Unsupported operation '{operacao}'."
+
+
 main_tool_agent = create_agent(
     model=main_llm,
-    tools=[tavily_web_search],
+    tools=[tavily_web_search, sandbox_file_manager],
 )
 
 
@@ -174,7 +263,6 @@ class ChatCompletionRequest(BaseModel):
 # ==========================================
 # 4. PREPARAÇÃO DE CONTEÚDO E MONTAGEM DE PROMPT
 # ==========================================
-
 def normalize_content(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -186,7 +274,6 @@ def normalize_content(content: Any) -> str:
 
 
 def sanitize_user_prompt(raw_text: str) -> str:
-    """Preserva indentação de código, mas remove quebras de linha exageradas e ruídos."""
     if not raw_text:
         return ""
     cleaned = raw_text.replace("\r\n", "\n").replace("\r", "\n")
@@ -207,10 +294,6 @@ def assemble_final_prompt(
     dados_web: str,
     prompt_usuario: str,
 ) -> List[BaseMessage]:
-    """
-    Monta um único HumanMessage em Markdown enxuto (sem SystemMessage em runtime e sem \n\n),
-    orientando explicitamente o Main LLM sobre como tratar cada seção.
-    """
     blocks: List[str] = []
 
     if ide_prompt:
@@ -227,7 +310,9 @@ def assemble_final_prompt(
         "No relevant external web documentation found.",
     ):
         blocks.append(
-            "# EXTERNAL TECHNICAL REFERENCE (VERIFIED DOCS - APPLY ONLY TO SUPPORT YOUR ANSWER BELOW)\n"
+            "# TOOL EXECUTION RESULTS (VERIFIED SANDBOX FILE SYSTEM / WEB SEARCH STATE)\n"
+            "IMPORTANT: If `FILE_WRITE_SUCCESS` appears below, keep your explanation and code block "
+            "consistent with the saved file `./sandbox/<filename>`.\n"
             f"{dados_web.strip()}"
         )
 
@@ -242,7 +327,6 @@ def assemble_final_prompt(
 # ==========================================
 # 5. DEFINIÇÃO DO ESTADO E NÓS DO LANGGRAPH
 # ==========================================
-
 class AgentState(TypedDict):
     messages: List[BaseMessage]
     system_prompt_ide: str
@@ -253,10 +337,6 @@ class AgentState(TypedDict):
 
 
 def memory_and_input_prep_node(state: AgentState):
-    """
-    Usa o Helper LLM (`LFM2.5-1.2B`) via `.invoke()` direto com prompt isolado
-    (sem Pydantic e sem SystemMessage em runtime) para comprimir o histórico incrementalmente.
-    """
     messages = state.get("messages", [])
     total_msgs = len(messages)
 
@@ -288,7 +368,7 @@ def memory_and_input_prep_node(state: AgentState):
                 f"{history_text}\n"
                 "# INSTRUCTION\n"
                 "Return ONLY the updated third-person technical summary (max 3 bullet points) "
-                "preserving all active constraints, target versions, and forbidden libraries."
+                "preserving all active constraints, target filenames, versions, and forbidden libraries."
             )
 
             try:
@@ -326,15 +406,23 @@ def memory_and_input_prep_node(state: AgentState):
 
 
 def tool_agent_search_node(state: AgentState):
-    """
-    Utiliza `create_agent` + `@tool("tavily_web_search", return_direct=True)` com o `main_llm`.
-    O modelo decide autonomamente se invoca a tool de busca ou responde 'NO_SEARCH'.
-    """
     clean_prompt = state["clean_user_prompt"]
+    existing_files = [p.name for p in sorted(SANDBOX_DIR.iterdir()) if p.is_file()]
+    files_str = ", ".join(existing_files) if existing_files else "None"
+
     agent_input = (
-        "Evaluate the developer request below. /no_think\n"
-        "Call `tavily_web_search` ONLY if external up-to-date documentation is strictly required. "
-        "If standard programming knowledge is sufficient, do NOT call any tool and reply only 'NO_SEARCH'.\n"
+        "Evaluate the developer request below.\n"
+        f"- **Files currently in ./sandbox/:** {files_str}\n"
+        f"- **Prior Session Context:** {state['short_term_memory']}\n"
+        "# TOOL EXECUTION & PARAMETER QUALITY RULES\n"
+        "1. If the user asks to READ an existing file from `./sandbox/`, call `sandbox_file_manager` "
+        "with `operacao='read_file'`, `nome_arquivo='<filename>'`, and `conteudo=''`.\n"
+        "2. If the user asks to CREATE, SAVE, or WRITE a file (e.g. 'script.py', 'Main.kt'), "
+        "call `sandbox_file_manager` with `operacao='write_file'`, `nome_arquivo='<filename>'`, and "
+        "put the COMPLETE, well-structured, best-practice code inside `conteudo` (including imports, "
+        "type hints, and clean functions, respecting all session constraints).\n"
+        "3. If the user asks about newly released external APIs or deprecations, call `tavily_web_search`.\n"
+        "4. If no file operation and no external web search are needed, do NOT call any tool and reply only 'NO_TOOL'.\n"
         f"# DEVELOPER REQUEST\n{clean_prompt}"
     )
 
@@ -342,19 +430,20 @@ def tool_agent_search_node(state: AgentState):
     try:
         result = main_tool_agent.invoke({"messages": [HumanMessage(content=agent_input)]})
         messages: List[BaseMessage] = result.get("messages", [])
-        for msg in reversed(messages):
-            if isinstance(msg, ToolMessage):
-                if msg.content and "No relevant external web documentation found" not in str(msg.content):
-                    web_text = str(msg.content)
-                break
+        tool_outputs: List[str] = []
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and msg.content:
+                if "No relevant external web documentation found" not in str(msg.content):
+                    tool_outputs.append(str(msg.content))
+        if tool_outputs:
+            web_text = "\n".join(tool_outputs)
     except Exception as exc:
-        print(f"[Aviso Tool Agent Search]: {exc}")
+        print(f"[Aviso Tool Agent]: {exc}")
 
     return {"web_search_data": web_text}
 
 
 def prompt_builder_node(state: AgentState):
-    """Constrói o HumanMessage final orientado para permitir SSE Streaming no FastAPI."""
     final_messages = assemble_final_prompt(
         memoria=state["short_term_memory"],
         ide_prompt=state["system_prompt_ide"],
@@ -379,7 +468,6 @@ app_graph = workflow.compile()
 # ==========================================
 # 6. ENDPOINT SSE (VS CODE / CONTINUE.DEV)
 # ==========================================
-
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     lc_messages: List[BaseMessage] = []
