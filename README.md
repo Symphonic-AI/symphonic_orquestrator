@@ -4,19 +4,20 @@
 
 **Middleware e proxy reverso inteligente com FastAPI, LangGraph e Tavily para orquestração de SLMs locais no [Continue.dev](https://continue.dev/)**
 
-[Version](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/releases)
+[](https://github.com/arthurbona123/workflow_ai_ollama)
 [](https://www.python.org/)
 [](https://fastapi.tiangolo.com/)
 [](https://github.com/langchain-ai/langgraph)
 [](https://ollama.com/)
 [](https://opensource.org/licenses/MIT)
 
-<br>
-
-[](https://github.com/arthurbona123/workflow_ai_ollama)
-[Issues](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/issues)
-[Last Commit](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/commits/main)
-[Stars](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/stargazers)
+<p align="center">
+<a href="https://www.google.com/search?q=%23-vis%C3%A3o-geral"><img src="https://www.google.com/search?q=https://img.shields.io/badge/Vis%C3%A3o_Geral-1F2937%3Fstyle%3Dflat-square" alt="Visão Geral" /></a>
+<a href="#%EF%B8%8F-arquitetura-e-fluxo-do-workflow"><img src="https://www.google.com/search?q=https://img.shields.io/badge/Arquitetura-1F2937%3Fstyle%3Dflat-square" alt="Arquitetura" /></a>
+<a href="https://www.google.com/search?q=%23-modelos-validados-e-em-testes-cont%C3%ADnuos"><img src="https://www.google.com/search?q=https://img.shields.io/badge/Modelos_%2526_Benchmarks-1F2937%3Fstyle%3Dflat-square" alt="Modelos e Benchmarks" /></a>
+<a href="#%EF%B8%8F-guia-rápido-de-instalação-e-execução"><img src="https://www.google.com/search?q=https://img.shields.io/badge/Instala%C3%A7%C3%A3o-1F2937%3Fstyle%3Dflat-square" alt="Instalação" /></a>
+<a href="https://www.google.com/search?q=%23-testes-e-garantia-de-qualidade"><img src="https://www.google.com/search?q=https://img.shields.io/badge/Testes-1F2937%3Fstyle%3Dflat-square" alt="Testes" /></a>
+</p>
 
 </div>
 
@@ -42,11 +43,14 @@
 
 O **AI SLM Workflow Orchestration** (`workflow_ai_ollama`) é um middleware de proxy reverso construído com **FastAPI** e **LangGraph**, projetado para atuar como ponte entre assistentes de código para IDEs (como o [Continue.dev](https://continue.dev/)) e motores de inferência local ([Ollama](https://ollama.com/) ou [LM Studio](https://lmstudio.ai/)).
 
-Ao utilizar Small Language Models (SLMs) locais no desenvolvimento de software, dois gargalos são recorrentes: o consumo acelerado da janela de contexto em sessões longas e a ausência de acesso a documentações recentes na web. Este projeto resolve esses pontos com:
+Ao utilizar Small Language Models (SLMs) locais (faixa de 1B a 4B parâmetros) no desenvolvimento de software, dois gargalos são recorrentes: o consumo acelerado da janela de contexto em sessões longas e a ausência de acesso a documentações recentes na web. Este projeto resolve esses pontos com uma **arquitetura híbrida de orquestração**:
 
-1. **Compressão Dinâmica de Histórico**: Um modelo auxiliar compacto resume mensagens anteriores em notas telegráficas, preservando tokens essenciais da janela de contexto.
-2. **Roteamento Autônomo e RAG em Tempo Real**: O orquestrador identifica automaticamente quando a consulta exige dados externos e executa pesquisas direcionadas via [Tavily Search API](https://tavily.com/).
-3. **Compatibilidade Total com a API OpenAI**: Exposição do endpoint `/v1/chat/completions` com suporte nativo a respostas em streaming (Server-Sent Events).
+1. **Compressão Dinâmica de Histórico (Structured Output)**: Um SLM auxiliar compacto (`LiquidAI/LFM2.5-1.2B-Instruct`) utiliza o schema Pydantic `MemoryBriefingSchema` apenas na etapa de resumo multi-turno, preservando tokens essenciais da janela de contexto.
+2. **Roteamento via Tool Calling Nativo (`@tool` + `create_agent`)**: Em vez de forçar saídas estruturadas no roteador — o que degrada a precisão em modelos menores — o orquestrador emprega `@tool` nativo do LangChain (`return_direct=True`) com `create_agent` para acionar a [Tavily Search API](https://tavily.com/) apenas quando a consulta exige dados externos.
+3. **Inferência Livre com Streaming SSE**: O modelo principal responde via `.invoke()` / `.astream()` sem amarras de schema rígido, expondo o endpoint `/v1/chat/completions` compatível com a API da OpenAI.
+
+> [!NOTE]
+> Os estudos empíricos de comportamento, latência e escolha dessa arquitetura híbrida para SLMs estão documentados em [docs/study\_validation\_workflow\_for\_slms.md](https://www.google.com/search?q=docs/study_validation_workflow_for_slms.md).
 
 ---
 
@@ -54,10 +58,10 @@ Ao utilizar Small Language Models (SLMs) locais no desenvolvimento de software, 
 
 - **Compatibilidade OpenAI `/v1`**: Atua como substituto transparente para qualquer cliente compatível com a especificação da OpenAI.
 - **Streaming SSE em Tempo Real**: Repasse contínuo de tokens gerados para resposta imediata na interface da IDE.
-- **Memória de Curto Prazo Eficiente**: Utiliza um SLM auxiliar compacto (por exemplo, `liquid/lfm2.5-1.2b`) para destilar e consolidar o histórico antes de cada chamada.
-- **Roteamento Inteligente com Decisão Autônoma**: O grafo avalia a intenção da query e aciona a busca na web apenas quando necessário.
-- **Modelfiles Pré-configurados para Codificação e Autocomplete**: Receitas dedicadas para modelos como `qwen2.5:1.5b`, ajustadas para engenharia de backend e Fill-In-The-Middle (FIM).
-- **Esteira Automatizada de CI/CD**: Verificação contínua com Pytest, cobertura de testes e empacotamento automatizado via GitHub Actions.
+- **Memória de Curto Prazo Eficiente**: Destilação e consolidação de histórico com `MemoryBriefingSchema` antes de cada chamada.
+- **Roteamento Inteligente com Tool Calling**: Avaliação autônoma via `create_agent` + `@tool(return_direct=True)` para acionar busca na web via Tavily somente quando estritamente necessário.
+- **Modelfiles Pré-configurados para Codificação e Autocomplete**: Receitas dedicadas para modelos como `qwen2.5:1.5b`, ajustadas para engenharia de backend e Fill-In-The-Middle (FIM), com parâmetros de inferência definidos diretamente no servidor (`Modelfile` / LM Studio).
+- **Suíte Progressiva de Testes**: Validação incremental por etapas (`test_step1` a `test_step4`) cobrindo loop bruto, saída estruturada, briefing de contexto híbrido e agente com tools.
 
 ---
 
@@ -67,29 +71,29 @@ O fluxo de processamento de cada requisição é governado por uma máquina de e
 
 ```mermaid
 flowchart TD
-    A[Requisição IDE / Continue.dev] --> B[FastAPI Proxy: /v1/chat/completions]
-    B --> C[memory_and_input_prep_node]
-    C -->|Histórico comprimido com SLM Auxiliar| D{gemma_router_node}
-    
-    D -->|Precisa de dados externos| E[tavily_search_node]
-    D -->|Conhecimento interno suficiente| F[prompt_builder_node]
-    
-    E -->|Contexto da Web injetado| F
-    F --> G[Inferência no Modelo Principal Ollama / LM Studio]
-    G -->|SSE Streaming Tokens| B
-    B --> H[IDE / Editor do Desenvolvedor]
+    A["Requisição IDE / Continue.dev"] --> B["FastAPI Proxy: /v1/chat/completions"]
+    B --> C["memory_and_input_prep_node (MemoryBriefingSchema)"]
+    C -->|"Histórico comprimido pelo SLM Auxiliar"| D{"Router Agent (@tool + create_agent)"}
+
+    D -->|"Precisa de dados externos"| E["tavily_search_node (return_direct=True)"]
+    D -->|"Conhecimento interno suficiente"| F["prompt_builder_node"]
+
+    E -->|"Contexto da Web injetado"| F
+    F --> G["Inferência Livre no SLM Principal (.astream)"]
+    G -->|"SSE Streaming Tokens"| B
+    B --> H["IDE / Editor do Desenvolvedor"]
 ```
 
 ### Detalhamento dos Nós do Grafo
 
 1. **`memory_and_input_prep_node`**:
-   Lê o histórico de mensagens da sessão e aciona um modelo rápido para sintetizar tópicos essenciais em notas telegráficas, descartando redundâncias e reduzindo o consumo de tokens.
-2. **`gemma_router_node`**:
-   Classifica se o prompt envolve bibliotecas recentes, erros de compilação com dependências externas ou consultas que demandam dados atualizados da web.
+   Lê o histórico de mensagens da sessão e aciona o SLM auxiliar (`LiquidAI/LFM2.5-1.2B-Instruct`) com `MemoryBriefingSchema` para sintetizar tópicos essenciais em notas telegráficas, descartando redundâncias e reduzindo o consumo de tokens.
+2. **Router Agent (`@tool` + `create_agent`)**:
+   Avalia se o prompt envolve bibliotecas recentes, erros de compilação com dependências externas ou consultas que demandam dados atualizados da web, evitando alucinações de roteamento.
 3. **`tavily_search_node`**:
-   Executa a busca direcionada na web e formata os snippets mais relevantes para compor o contexto da resposta.
+   Executa a busca direcionada na web (`return_direct=True`) e formata os snippets mais relevantes para compor o contexto da resposta.
 4. **`prompt_builder_node`**:
-   Monta a instrução de sistema unificada contendo a memória consolidada, os fatos recolhidos da web (quando houver) e a pergunta original do desenvolvedor, despachando o payload para o SLM principal.
+   Monta um único `HumanMessage` formatado em Markdown contendo a memória consolidada, os fatos recolhidos da web (quando houver) e a pergunta original do desenvolvedor, despachando o payload para o SLM principal via `.astream()`.
 
 ---
 
@@ -114,6 +118,9 @@ ollama create qwen2.5-coder-custom -f modelfiles_src/Modelfile_qwen2_5_coder
 ollama create qwen2.5-coder-auto -f modelfiles_src/Modelfile_qwen2_5_coder_auto
 ```
 
+> [!TIP]
+> Os parâmetros de inferência (`temperature`, `top_k`, `top_p`, `min_p`, `num_ctx`) e o prompt `SYSTEM` são definidos diretamente no `Modelfile` do Ollama ou nas configurações do LM Studio, evitando sobrescritas conflitantes na camada Python.
+
 ---
 
 ## 🔬 Modelos Validados e em Testes Contínuos
@@ -126,7 +133,7 @@ Abaixo estão relacionados os modelos open-source adotados, avaliados ou atualme
 |  | **Qwen2.5-Coder-3B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct) • [Qwen2.5-Coder Report](https://arxiv.org/abs/2409.12186) | [Qwen2.5-Coder-3B-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF) |  |
 |  | **Qwen2.5-Coder-1.5B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct) • [Qwen2.5-Coder Report](https://arxiv.org/abs/2409.12186) | [Qwen2.5-Coder-1.5B-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF) |  |
 |  | **Qwen2.5-0.8B (0.5B)** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) • [Qwen2.5 Paper](https://arxiv.org/abs/2412.15115) | [Qwen2.5-0.5B-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) |  |
-|  | **Qwen3-1.7B** | [Qwen Ecosystem Card](https://huggingface.co/Qwen) • [QwenLM Blog](https://qwenlm.github.io/) | [Qwen Series GGUFs](https://huggingface.co/models?search=Qwen+GGUF) |  |
+|  | **Qwen3-1.7B** | [Model Card (HF)](https://huggingface.co/Qwen/Qwen3-1.7B) • [QwenLM Blog](https://qwenlm.github.io/) | [Qwen3-1.7B-GGUF](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) |  |
 |  | **Llama 3.2 1B Instruct** | [Model Card (HF)](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) • [Llama 3 Paper](https://arxiv.org/abs/2407.21783) | [Llama-3.2-1B-GGUF](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF) |  |
 |  | **Gemma 2 1B IT QAT** | [Model Card (HF)](https://huggingface.co/google/gemma-2-2b-it) • [Gemma 2 Report](https://arxiv.org/abs/2408.00118) | [Gemma-2-GGUF](https://huggingface.co/google/gemma-2-2b-it-GGUF) |  |
 |  | **Liquid LFM5.2-1.5B (LFM2.5)** | [Liquid AI Hub](https://huggingface.co/LiquidAI) • [Liquid Architecture Docs](https://www.liquid.ai/) | [LFM2.5-GGUF](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF) |  |
@@ -147,8 +154,8 @@ O projeto utiliza o ecossistema moderno de orquestração de IA em Python:
 | **LangChain Core** | `>= 0.3.0` | Interfaces e abstrações de mensagens, prompts e modelos |
 | **LangChain OpenAI** | `>= 0.2.0` | Cliente para comunicação com endpoints locais OpenAI-compatible |
 | **Tavily Python** | `>= 0.5.0` | SDK de busca e recuperação de conteúdo na web para RAG |
-| **Pydantic** | `>= 2.9.0` | Validação de schemas e serialização de dados de entrada/saída |
-| **Pytest & Pytest-Asyncio**| `>= 8.3.0 / 0.24.0` | Testes unitários assíncronos e verificação de nós de orquestração |
+| **Pydantic** | `>= 2.9.0` | Validação de schemas (`MemoryBriefingSchema`) e serialização |
+| **Pytest & Pytest-Asyncio** | `>= 8.3.0 / 0.24.0` | Testes unitários assíncronos e validação progressiva dos nós |
 
 ---
 
@@ -229,7 +236,7 @@ Para conectar a extensão [Continue.dev](https://continue.dev/) no VS Code ou Je
 {
   "models": [
     {
-      "title": "Local LangGraph Workflow",
+      "title": "AI SLM Workflow Orchestration",
       "provider": "openai",
       "model": "google/gemma4-e4b",
       "apiBase": "http://localhost:8000/v1",
@@ -249,7 +256,7 @@ Para conectar a extensão [Continue.dev](https://continue.dev/) no VS Code ou Je
 
 ## 🧪 Testes e Garantia de Qualidade
 
-A suíte de testes unitários valida os nós de decisão do LangGraph, a normalização de contexto e as respostas da API FastAPI:
+A suíte de testes unitários valida de forma progressiva cada camada da orquestração (`test_step1_raw_chat_loop.py`, `test_step2_pydantic_chat_loop.py`, `test_step3_hybrid_context_briefing.py` e `test_step4_langchain_tool_agent.py`):
 
 ```bash
 # Executa todos os testes unitários
@@ -259,10 +266,8 @@ pytest
 pytest --cov=src --cov-report=term-missing
 ```
 
-A integridade do código também é verificada a cada push ou pull request através dos workflows do GitHub Actions configurados em `.github/workflows/ci.yml`.
-
 ---
 
 ## 📄 Licença
 
-Este projeto está distribuído sob a licença **MIT**. Consulte o arquivo [LICENSE](https://www.google.com/search?q=https://github.com/arthurbona123/workflow_ai_ollama/blob/main/LICENSE) para mais informações.
+Este projeto está distribuído sob a licença **MIT**. Consulte o arquivo [LICENSE](https://www.google.com/search?q=LICENSE) para mais informações.

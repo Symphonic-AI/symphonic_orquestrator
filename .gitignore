@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Diretórios de sandbox usados em runtime pelos modelos, os quais não devem ser commitados.
+
+sandbox/*
